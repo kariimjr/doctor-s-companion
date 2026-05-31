@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
-import { Stethoscope, LogOut, MessageSquare, ClipboardCheck } from "lucide-react";
+import { Stethoscope, LogOut, MessageSquare, ClipboardCheck, ClipboardList } from "lucide-react";
 import {
   clearDoctor,
+  useDoctorProfile,
   useDoctorSession,
   usePresence,
 } from "@/lib/doctor-session";
@@ -13,6 +14,9 @@ import { isFirebaseConfigured } from "@/lib/firebase";
 import { DoctorSignIn } from "@/components/DoctorSignIn";
 import { ChatDashboard } from "@/components/ChatDashboard";
 import { DiagnosesPanel } from "@/components/DiagnosesPanel";
+import { ActionPlanPanel } from "@/components/ActionPlanPanel";
+import { SpecialtyOnboarding } from "@/components/SpecialtyOnboarding";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
