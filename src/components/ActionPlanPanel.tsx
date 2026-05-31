@@ -22,12 +22,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { CalendarClock, PillBottle, UserRound } from "lucide-react";
+import { CalendarClock, PillBottle, UserRound, ClipboardList, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Patient {
   id: string;
-  name: string;
+  name?: string;
+  fullName?: string;
+  email?: string;
 }
 
 interface Treatment {
@@ -39,12 +41,31 @@ interface Treatment {
   createdAt?: { seconds: number } | null;
 }
 
+interface PatientActiveMedicine {
+  id: string;
+  name: string;
+  time?: string;
+  type?: string;
+  dosage?: string;
+  currentDoses?: number;
+  targetDoses?: number;
+}
+
 const SCAN_INTERVALS = [
   { value: "7d", label: "7 days" },
   { value: "14d", label: "14 days" },
   { value: "1mo", label: "1 month" },
   { value: "3mo", label: "3 months" },
   { value: "6mo", label: "6 months" },
+];
+
+// 🎯 Added medicine types to map perfectly to your Flutter presentation models
+const MEDICINE_TYPES = [
+  { value: "Pill", label: "💊 Pill / Tablet" },
+  { value: "Syrup", label: "🧪 Syrup Liquid" },
+  { value: "Injection", label: "💉 Injection" },
+  { value: "Cream", label: "🧴 Topical Cream" },
+  { value: "Inhaler", label: "🫁 Inhaler" },
 ];
 
 export function ActionPlanPanel({
@@ -91,41 +112,30 @@ export function ActionPlanPanel({
                 No patients yet.
               </li>
             ) : (
-              patients.map((p) => (
-                <li key={p.id}>
-                  <button
-                    onClick={() => setActiveId(p.id)}
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
-                      p.id === activeId
-                        ? "bg-primary text-primary-foreground"
-                        : "hover:bg-secondary",
-                    )}
-                  >
-                    <div
+              patients.map((p) => {
+                const patientDisplayName = p.fullName || p.name || p.email?.split("@")[0] || "Unknown Patient";
+                return (
+                  <li key={p.id}>
+                    <button
+                      onClick={() => setActiveId(p.id)}
                       className={cn(
-                        "flex h-9 w-9 items-center justify-center rounded-full",
-                        p.id === activeId ? "bg-primary-foreground/15" : "bg-secondary",
+                        "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
+                        p.id === activeId ? "bg-primary text-primary-foreground" : "hover:bg-secondary",
                       )}
                     >
-                      <UserRound className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{p.name}</div>
-                      <div
-                        className={cn(
-                          "truncate text-xs",
-                          p.id === activeId
-                            ? "text-primary-foreground/80"
-                            : "text-muted-foreground",
-                        )}
-                      >
-                        {p.id}
+                      <div className={cn("flex h-9 w-9 items-center justify-center rounded-full", p.id === activeId ? "bg-primary-foreground/15" : "bg-secondary")}> 
+                        <UserRound className="h-4 w-4" />
                       </div>
-                    </div>
-                  </button>
-                </li>
-              ))
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold tracking-tight">{patientDisplayName}</div>
+                        <div className={cn("truncate text-[10px] font-mono opacity-60", p.id === activeId ? "text-primary-foreground" : "text-muted-foreground")}>
+                          ID: {p.id.substring(0, 8)}...
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })
             )}
           </ul>
         </ScrollArea>
@@ -156,57 +166,80 @@ function ActionPlanForms({
   const db = getDb();
   const [medication, setMedication] = useState("");
   const [interval, setInterval] = useState<string>("");
+  const [medType, setMedType] = useState<string>("Pill"); // 🟢 New Type State
+  const [medTime, setMedTime] = useState<string>("08:00 AM"); // 🟢 New Time State
+  const [targetDoses, setTargetDoses] = useState<number>(3); // 🟢 New Doses Target State
   const [submitting, setSubmitting] = useState(false);
   const [history, setHistory] = useState<Treatment[]>([]);
+  const [activeMeds, setActiveMeds] = useState<PatientActiveMedicine[]>([]);
 
   useEffect(() => {
     setMedication("");
     setInterval("");
+    setMedType("Pill");
+    setMedTime("08:00 AM");
+    setTargetDoses(3);
   }, [patient.id]);
 
-  // Live history of treatments for this patient
   useEffect(() => {
     if (!db) return;
-    const q = query(
-      collection(db, "patients", patient.id, "treatments"),
-      orderBy("createdAt", "desc"),
-    );
+    const q = query(collection(db, "patients", patient.id, "treatments"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
-      setHistory(
-        snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Treatment, "id">) })),
-      );
+      setHistory(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Treatment, "id">) })));
+    });
+    return () => unsub();
+  }, [db, patient.id]);
+
+  useEffect(() => {
+    if (!db) return;
+    const medsRef = collection(db, "patients", patient.id, "medicines");
+    const unsub = onSnapshot(medsRef, (snap) => {
+      setActiveMeds(snap.docs.map((d) => ({ id: d.id, ...(d.data() as PatientActiveMedicine) })));
     });
     return () => unsub();
   }, [db, patient.id]);
 
   const submit = async () => {
     if (!db) {
-      toast.error("Firebase isn't configured.");
+      toast.error("Firebase connection context error.");
       return;
     }
-    if (!medication.trim() || !interval) {
-      toast.error("Add a medication and pick a scan interval.");
+    if (!medication.trim() || !interval || !medTime) {
+      toast.error("Please fill in all medical form parameters completely.");
       return;
     }
     setSubmitting(true);
     try {
-      const intervalLabel =
-        SCAN_INTERVALS.find((s) => s.value === interval)?.label ?? interval;
+      const intervalLabel = SCAN_INTERVALS.find((s) => s.value === interval)?.label ?? interval;
+      const patientNameString = patient.fullName || patient.name || "Patient";
+
+      // A: Log history payload
       await addDoc(collection(db, "patients", patient.id, "treatments"), {
         medication: medication.trim(),
         scanInterval: interval,
         scanIntervalLabel: intervalLabel,
-        doctorId: doctor.id,
         doctorName: doctor.name,
         specialty: profile?.specialty ?? null,
         createdAt: serverTimestamp(),
       });
-      toast.success(`Action plan saved for ${patient.name}.`);
+
+      // B: Injects straight into Flutter's specific model schema fields cleanly!
+      await addDoc(collection(db, "patients", patient.id, "medicines"), {
+        name: medication.trim(),
+        time: medTime,                    // 🟢 Synchronized dynamic time input string
+        type: medType.toLowerCase(),      // 🟢 Matches lowercase naming rules (e.g. 'pill')
+        targetDoses: Number(targetDoses), // 🟢 Parsed explicitly as integer numerical values
+        currentDoses: 0,
+        dosage: `Take as instructed by Dr. ${doctor.name}`,
+        lastUpdated: serverTimestamp(),
+      });
+
+      toast.success(`Action plan saved and synced to ${patientNameString}'s Flutter app.`);
       setMedication("");
       setInterval("");
     } catch (err) {
       console.error(err);
-      toast.error("Failed to save action plan.");
+      toast.error("Failed to write parameters across database cluster nodes.");
     } finally {
       setSubmitting(false);
     }
@@ -216,90 +249,174 @@ function ActionPlanForms({
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
       <Card className="p-5">
         <div className="mb-4">
-          <h3 className="text-base font-semibold">Issue Action Plan</h3>
+          <h3 className="text-base font-semibold">Issue Complete Action Plan</h3>
           <p className="text-xs text-muted-foreground">
-            For <span className="font-medium text-foreground">{patient.name}</span> ·
-            syncs to the patient's calendar in the Flutter app.
+            Fills layout elements inside the patient's Flutter dashboard instantly.
           </p>
         </div>
 
         <div className="space-y-4">
           <div>
             <Label htmlFor="meds" className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              Prescriptions / Medication
+              Medicine Name
             </Label>
             <Input
               id="meds"
               value={medication}
               onChange={(e) => setMedication(e.target.value)}
-              placeholder="e.g. Amoxicillin 500mg, 3x daily for 7 days"
-              maxLength={500}
+              placeholder="e.g. Amoxicillin 500mg"
+              maxLength={200}
             />
           </div>
 
-          <div>
-            <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              Recommended Scan Interval
-            </Label>
-            <Select value={interval} onValueChange={setInterval}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select interval" />
-              </SelectTrigger>
-              <SelectContent>
-                {SCAN_INTERVALS.map((s) => (
-                  <SelectItem key={s.value} value={s.value}>
-                    {s.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* 🟢 NEW FIELD GRID: Type, Time, and Target Doses selectors layout configuration */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">Medicine Type</Label>
+              <Select value={medType} onValueChange={setMedType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MEDICINE_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">Daily Target Doses</Label>
+              <Input
+                type="number"
+                min={1}
+                max={10}
+                value={targetDoses}
+                onChange={(e) => setTargetDoses(Number(e.target.value))}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">Intake Schedule Time</Label>
+              <Input
+                type="text"
+                placeholder="e.g. 08:00 AM"
+                value={medTime}
+                onChange={(e) => setMedTime(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">Recommended Scan Interval</Label>
+              <Select value={interval} onValueChange={setInterval}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select interval" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SCAN_INTERVALS.map((s) => (
+                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           <Button
             onClick={submit}
-            disabled={submitting || !medication.trim() || !interval}
-            className="h-11 w-full rounded-xl text-sm font-semibold"
+            disabled={submitting || !medication.trim() || !interval || !medTime}
+            className="h-11 w-full rounded-xl text-sm font-semibold mt-2"
           >
-            {submitting ? "Saving…" : "Submit Action Plan"}
+            {submitting ? "Processing Database Write..." : "Submit and Sync to Patient App"}
           </Button>
         </div>
       </Card>
 
-      <Card className="p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold">Recent plans</h3>
-            <p className="text-xs text-muted-foreground">Latest treatments for this patient</p>
+      <div className="space-y-6">
+        {/* Live Active Tracker layout reflects detailed metadata parameters */}
+        <Card className="p-5 border-blue-100 bg-gradient-to-b from-white to-blue-50/20">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-blue-950 flex items-center gap-2">
+                <ClipboardList className="h-4 w-4 text-blue-600" />
+                Active Patient Medications
+              </h3>
+              <p className="text-xs text-muted-foreground">Daily checklist telemetry parsed from mobile device</p>
+            </div>
+            <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+              {activeMeds.length} Active
+            </span>
           </div>
-          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-semibold text-secondary-foreground">
-            {history.length}
-          </span>
-        </div>
-        {history.length === 0 ? (
-          <div className="rounded-xl border border-dashed bg-secondary/40 p-6 text-center text-sm text-muted-foreground">
-            No action plans yet.
+
+          {activeMeds.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-blue-200 bg-white p-6 text-center text-sm text-muted-foreground">
+              Patient has no running medications assigned inside their calendar.
+            </div>
+          ) : (
+            <div className="max-h-[180px] overflow-y-auto space-y-2 pr-1">
+              {activeMeds.map((med) => (
+                <div key={med.id} className="rounded-xl border bg-white p-3 flex justify-between items-center shadow-xs">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-800 flex items-center gap-1.5 truncate">
+                      <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+                      {med.name}
+                    </div>
+                    {/* 🟢 Displays custom time and type metadata parameters on preview cards */}
+                    <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-2">
+                      <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 capitalize font-medium">{med.type || "pill"}</span>
+                      <span className="flex items-center gap-0.5 text-slate-500">
+                        <Clock className="h-3 w-3" /> {med.time || "08:00 AM"}
+                      </span>
+                    </div>
+                  </div>
+                  {med.targetDoses !== undefined && (
+                    <div className="text-xs font-semibold px-2 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-lg font-mono">
+                      {med.currentDoses}/{med.targetDoses} Doses
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Historical entries log column container */}
+        <Card className="p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-semibold">Treatment Plan History</h3>
+              <p className="text-xs text-muted-foreground">Historical milestones provided by medical team</p>
+            </div>
+            <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-semibold text-secondary-foreground">
+              {history.length} Total
+            </span>
           </div>
-        ) : (
-          <ul className="space-y-2">
-            {history.slice(0, 6).map((t) => (
-              <li key={t.id} className="rounded-xl border bg-secondary/30 p-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <PillBottle className="h-4 w-4 text-primary" />
-                  {t.medication}
+          {history.length === 0 ? (
+            <div className="rounded-xl border border-dashed bg-secondary/40 p-6 text-center text-sm text-muted-foreground">
+              No historical entries assigned.
+            </div>
+          ) : (
+            <div className="max-h-[160px] overflow-y-auto space-y-2 pr-1">
+              {history.slice(0, 6).map((t) => (
+                <div key={t.id} className="rounded-xl border bg-secondary/30 p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <PillBottle className="h-4 w-4 text-primary" />
+                    {t.medication}
+                  </div>
+                  <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <CalendarClock className="h-3.5 w-3.5" />
+                      {SCAN_INTERVALS.find((s) => s.value === t.scanInterval)?.label ?? t.scanInterval ?? "—"}
+                    </span>
+                    {t.doctorName && <span>· Dr. {t.doctorName}</span>}
+                  </div>
                 </div>
-                <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1">
-                    <CalendarClock className="h-3.5 w-3.5" />
-                    {SCAN_INTERVALS.find((s) => s.value === t.scanInterval)?.label ?? t.scanInterval ?? "—"}
-                  </span>
-                  {t.doctorName && <span>· Dr. {t.doctorName}</span>}
-                  {t.specialty && <span>· {t.specialty}</span>}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
