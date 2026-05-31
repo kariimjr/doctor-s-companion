@@ -67,14 +67,6 @@ function PortalPage() {
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <Stethoscope className="h-5 w-5" />
             </div>
-  return (
-    <div className="min-h-screen bg-secondary/40">
-      <header className="border-b bg-card">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <Stethoscope className="h-5 w-5" />
-            </div>
             <div>
               <h1 className="text-base font-semibold leading-tight">Doctor Medical Portal</h1>
               <p className="text-xs text-muted-foreground">
