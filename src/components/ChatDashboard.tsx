@@ -3,6 +3,7 @@ import {
   addDoc,
   collection,
   doc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -19,7 +20,9 @@ import { cn } from "@/lib/utils";
 
 interface Patient {
   id: string;
-  name: string;
+  fullName?: string; // 🎯 Matches your database snapshot
+  age?: number;
+  gender?: string;
   lastMessage?: string;
   updatedAt?: { seconds: number } | null;
 }
@@ -32,7 +35,7 @@ interface Message {
 }
 
 function chatIdFor(doctorId: string, patientId: string) {
-  return [`d_${doctorId}`, `p_${patientId}`].sort().join("__");
+  return `${patientId}_${doctorId}`; 
 }
 
 export function ChatDashboard({ doctor }: { doctor: DoctorSession }) {
@@ -40,19 +43,57 @@ export function ChatDashboard({ doctor }: { doctor: DoctorSession }) {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  // Subscribe to patients collection
   useEffect(() => {
     if (!db) return;
-    const unsub = onSnapshot(collection(db, "patients"), (snap) => {
-      const list: Patient[] = snap.docs.map((d) => ({
-        id: d.id,
-        ...(d.data() as Omit<Patient, "id">),
-      }));
-      setPatients(list);
-      setActiveId((cur) => cur ?? list[0]?.id ?? null);
+
+    const fetchGlobalPatients = async () => {
+      const snap = await getDocs(collection(db, "patients"));
+      return snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Patient, "id">) }));
+    };
+
+    const chatsRef = collection(db, "chats");
+    const unsubChats = onSnapshot(chatsRef, async (chatSnap) => {
+      const allPatients = await fetchGlobalPatients();
+      
+      let activePatientsList: Patient[] = [];
+
+      chatSnap.docs.forEach((doc) => {
+        const chatId = doc.id;
+        if (chatId.endsWith(`_${doctor.id}`)) {
+          const pId = chatId.replace(`_${doctor.id}`, "");
+          const patientProfile = allPatients.find(p => p.id === pId);
+          
+          if (patientProfile) {
+             const chatData = doc.data();
+             activePatientsList.push({
+               ...patientProfile,
+               lastMessage: chatData.lastMessage || patientProfile.lastMessage,
+               updatedAt: chatData.updatedAt || patientProfile.updatedAt
+             });
+          }
+        }
+      });
+
+      activePatientsList = activePatientsList.filter(
+        (p) => p.lastMessage && p.lastMessage !== "Account created"
+      );
+
+      activePatientsList.sort((a, b) => {
+        const timeA = a.updatedAt?.seconds || 0;
+        const timeB = b.updatedAt?.seconds || 0;
+        return timeB - timeA;
+      });
+
+      setPatients(activePatientsList);
+      
+      setActiveId((cur) => {
+        if (cur && activePatientsList.some((p) => p.id === cur)) return cur;
+        return activePatientsList[0]?.id ?? null;
+      });
     });
-    return () => unsub();
-  }, [db]);
+    
+    return () => unsubChats();
+  }, [db, doctor.id]);
 
   const active = patients.find((p) => p.id === activeId) ?? null;
 
@@ -61,17 +102,17 @@ export function ChatDashboard({ doctor }: { doctor: DoctorSession }) {
       <aside className="flex min-h-0 flex-col border-r bg-secondary/40">
         <div className="border-b p-4">
           <h2 className="text-sm font-semibold tracking-wide text-muted-foreground">
-            ACTIVE PATIENTS
+            MY ACTIVE PATIENTS
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            {patients.length} in your queue
+            {patients.length} active chats
           </p>
         </div>
         <ScrollArea className="flex-1">
           <ul className="p-2">
             {patients.length === 0 ? (
               <li className="px-3 py-8 text-center text-xs text-muted-foreground">
-                No patients yet. Add documents to <code>/patients</code> in Firestore.
+                No active conversations for you yet.
               </li>
             ) : (
               patients.map((p) => (
@@ -93,7 +134,7 @@ export function ChatDashboard({ doctor }: { doctor: DoctorSession }) {
           <ChatView doctor={doctor} patient={active} />
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Select a patient to start chatting
+            Select a patient from your list to start chatting
           </div>
         )}
       </section>
@@ -113,6 +154,8 @@ function PatientItem({
   onSelect: () => void;
 }) {
   const doctorStatus = useDoctorStatus(doctor.id);
+  const displayName = patient.fullName || "Unknown Patient"; // 🎯 Updated field mapping
+
   return (
     <li>
       <button
@@ -136,7 +179,7 @@ function PatientItem({
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{patient.name}</div>
+          <div className="truncate text-sm font-medium">{displayName}</div>
           <div
             className={cn(
               "truncate text-xs",
@@ -176,28 +219,49 @@ function ChatView({ doctor, patient }: { doctor: DoctorSession; patient: Patient
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight });
   }, [messages]);
 
+  const formatTime = (timestamp?: { seconds: number } | null) => {
+    if (!timestamp || !timestamp.seconds) return "";
+    const date = new Date(timestamp.seconds * 1000);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   const send = async () => {
     const value = text.trim();
     if (!value || !db) return;
     setText("");
+
+    const timestamp = serverTimestamp();
+
     await addDoc(collection(db, "chats", chatId, "messages"), {
       senderId: doctor.id,
       text: value,
-      timestamp: serverTimestamp(),
+      timestamp: timestamp,
     });
+
+    await setDoc(
+      doc(db, "chats", chatId),
+      { lastMessage: value, updatedAt: timestamp },
+      { merge: true },
+    );
+    
     await setDoc(
       doc(db, "patients", patient.id),
-      { lastMessage: value, updatedAt: serverTimestamp() },
+      { lastMessage: value, updatedAt: timestamp },
       { merge: true },
     );
   };
+
+  const displayName = patient.fullName || "Unknown Patient"; // 🎯 Updated field mapping
+  const demographics = patient.age && patient.gender 
+    ? `${patient.gender}, ${patient.age} yrs` 
+    : "Patient Profile";
 
   return (
     <>
       <header className="flex items-center justify-between border-b px-6 py-4">
         <div>
-          <h3 className="text-base font-semibold">{patient.name}</h3>
-          <p className="text-xs text-muted-foreground">Patient · {patient.id}</p>
+          <h3 className="text-base font-semibold">{displayName}</h3>
+          <p className="text-xs text-muted-foreground">{demographics}</p>
         </div>
         <span className="inline-flex items-center gap-2 rounded-full bg-secondary px-3 py-1 text-xs font-medium text-secondary-foreground">
           <Stethoscope className="h-3.5 w-3.5" /> Dr. {doctor.name}
@@ -207,16 +271,18 @@ function ChatView({ doctor, patient }: { doctor: DoctorSession; patient: Patient
       <div ref={scrollerRef} className="flex-1 overflow-y-auto px-6 py-4">
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            No messages yet. Say hello to {patient.name}.
+            No messages yet. Say hello to {displayName}.
           </div>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-3">
             {messages.map((m) => {
               const mine = m.senderId === doctor.id;
+              const formattedTime = formatTime(m.timestamp);
+              
               return (
                 <li
                   key={m.id}
-                  className={cn("flex", mine ? "justify-end" : "justify-start")}
+                  className={cn("flex flex-col", mine ? "items-end" : "items-start")}
                 >
                   <div
                     className={cn(
@@ -228,6 +294,12 @@ function ChatView({ doctor, patient }: { doctor: DoctorSession; patient: Patient
                   >
                     {m.text}
                   </div>
+                  
+                  {formattedTime && (
+                    <span className="mt-1 px-1 text-[10px] text-muted-foreground tracking-tight">
+                      {formattedTime}
+                    </span>
+                  )}
                 </li>
               );
             })}
@@ -245,7 +317,7 @@ function ChatView({ doctor, patient }: { doctor: DoctorSession; patient: Patient
         <Input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={`Message ${patient.name}…`}
+          placeholder={`Message ${displayName}…`}
           className="h-11 rounded-full bg-secondary/60"
         />
         <Button type="submit" size="icon" className="h-11 w-11 rounded-full" disabled={!text.trim()}>

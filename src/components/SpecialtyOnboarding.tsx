@@ -1,17 +1,12 @@
-import { useEffect, useState } from "react";
-import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { useState, useEffect } from "react";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
-import type { DoctorSession } from "@/lib/doctor-session";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { saveDoctor, type DoctorSession } from "@/lib/doctor-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Stethoscope } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -32,110 +27,204 @@ const SPECIALTIES = [
   "Psychiatrist",
 ];
 
-export function SpecialtyOnboarding({
-  open,
-  doctor,
-}: {
-  open: boolean;
-  doctor: DoctorSession;
-}) {
+interface DoctorAuthProps {
+  onAuthSuccess?: (doctor: DoctorSession) => void;
+}
+
+export function DoctorSignIn({ onAuthSuccess }: DoctorAuthProps) {
+  const db = getDb();
+  
+  // 🔄 Mode toggle state: "signin" or "signup"
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  
+  // Form input states
+  const [id, setId] = useState("");
+  const [name, setName] = useState("");
   const [specialty, setSpecialty] = useState("");
-  const [doctorIdInput, setDoctorIdInput] = useState(doctor.id);
-  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
 
+  // Clear tracking values when changing registration modes to avoid messy payloads
   useEffect(() => {
-    if (open) setDoctorIdInput(doctor.id);
-  }, [open, doctor.id]);
+    setId("");
+    setName("");
+    setSpecialty("");
+  }, [authMode]);
 
-  const submit = async () => {
-    const db = getDb();
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
     if (!db) {
       toast.error("Firebase isn't configured.");
       return;
     }
-    const trimmedId = doctorIdInput.trim();
-    if (!specialty || !trimmedId) {
-      toast.error("Please pick a specialty and confirm your Doctor ID.");
+
+    const normalizedId = id.trim().toLowerCase();
+    const cleanName = name.trim();
+
+    if (!normalizedId) {
+      toast.error("Please provide a valid Doctor ID.");
       return;
     }
-    setSaving(true);
+
+    setLoading(true);
+
     try {
-      await setDoc(
-        doc(db, "doctors", trimmedId),
-        {
-          id: trimmedId,
-          name: doctor.name,
-          specialty,
+      const doctorDocRef = doc(db, "doctors", normalizedId);
+
+      if (authMode === "signin") {
+        // --- 🔑 LIVE SIGN IN VERIFICATION ---
+        const docSnap = await getDoc(doctorDocRef);
+
+        if (!docSnap.exists()) {
+          toast.error("Doctor ID not recognized. Click register below to build a profile.");
+          setLoading(false);
+          return;
+        }
+
+        const activeDoctorData = docSnap.data();
+
+        // Push immediate live cloud parameter indicator flag updates 
+        await setDoc(
+          doctorDocRef, 
+          { status: "online", lastSeen: serverTimestamp() }, 
+          { merge: true }
+        );
+
+        const currentSession: DoctorSession = {
+          id: normalizedId,
+          name: activeDoctorData.name || normalizedId,
+        };
+
+        saveDoctor(currentSession);
+        toast.success(`Welcome back, Dr. ${currentSession.name}!`);
+        if (onAuthSuccess) onAuthSuccess(currentSession);
+
+      } else {
+        // --- 📝 NEW PROFILE CREATION (SIGN UP) ---
+        if (!cleanName || !specialty) {
+          toast.error("Please choose a specialty field and input your name.");
+          setLoading(false);
+          return;
+        }
+
+        // Avoid accidental profile replacements/overwrites
+        const checkSnap = await getDoc(doctorDocRef);
+        if (checkSnap.exists()) {
+          toast.error("This ID registration matches an existing professional record.");
+          setLoading(false);
+          return;
+        }
+
+        const newProfilePayload = {
+          id: normalizedId,
+          name: cleanName,
+          specialty: specialty,
           status: "online",
           onboardedAt: serverTimestamp(),
           lastSeen: serverTimestamp(),
-        },
-        { merge: true },
-      );
-      toast.success(`Welcome, Dr. ${doctor.name} (${specialty})`);
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to save your profile.");
+        };
+
+        // Write new record block index securely directly down to Firestore DB
+        await setDoc(doctorDocRef, newProfilePayload);
+
+        const currentSession: DoctorSession = { id: normalizedId, name: cleanName };
+        saveDoctor(currentSession);
+
+        toast.success(`Welcome aboard, Dr. ${cleanName}!`);
+        if (onAuthSuccess) onAuthSuccess(currentSession);
+      }
+    } catch (error) {
+      console.error("Authentication exception:", error);
+      toast.error("An error occurred during authentication verification.");
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
   return (
-    <Dialog open={open}>
-      <DialogContent
-        className="sm:max-w-md"
-        onPointerDownOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
-      >
-        <DialogHeader>
-          <DialogTitle>Complete your profile</DialogTitle>
-          <DialogDescription>
-            We need a few details before you can start reviewing cases.
-          </DialogDescription>
-        </DialogHeader>
+    <div className="flex min-h-screen items-center justify-center bg-secondary/40 px-4">
+      <Card className="w-full max-w-md p-8 shadow-sm border bg-card">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+            <Stethoscope className="h-6 w-6" />
+          </div>
+          <h1 className="text-xl font-semibold tracking-tight">
+            {authMode === "signin" ? "Doctor Portal Sign In" : "Register Doctor Account"}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {authMode === "signin"
+              ? "Access your dashboard window to review assigned cases."
+              : "Register your specialist profile to initialize clinic features."}
+          </p>
+        </div>
 
-        <div className="space-y-4 py-2">
+        <form onSubmit={handleAuth} className="space-y-4">
+          {/* Dynamic field rendering context setup checks */}
           <div>
-            <Label htmlFor="onb-id" className="mb-1.5 block text-xs font-medium text-muted-foreground">
+            <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">
               Unique Doctor ID
             </Label>
             <Input
-              id="onb-id"
-              value={doctorIdInput}
-              onChange={(e) => setDoctorIdInput(e.target.value)}
-              placeholder="e.g. dr_jdoe_2024"
+              value={id}
+              onChange={(e) => setId(e.target.value)}
+              placeholder="e.g. ahmed"
               maxLength={64}
+              required
             />
           </div>
 
-          <div>
-            <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              Specialty
-            </Label>
-            <Select value={specialty} onValueChange={setSpecialty}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select your specialty" />
-              </SelectTrigger>
-              <SelectContent>
-                {SPECIALTIES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+          {authMode === "signup" && (
+            <>
+              <div>
+                <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  Full Professional Name
+                </Label>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Dr. Ahmed Mohamed"
+                  required
+                />
+              </div>
 
-        <Button
-          onClick={submit}
-          disabled={saving || !specialty || !doctorIdInput.trim()}
-          className="h-11 w-full rounded-xl text-sm font-semibold"
-        >
-          {saving ? "Saving…" : "Save & continue"}
-        </Button>
-      </DialogContent>
-    </Dialog>
+              <div>
+                <Label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  Medical Specialty Field
+                </Label>
+                <Select value={specialty} onValueChange={setSpecialty}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select assigned clinical area" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SPECIALTIES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+
+          <Button type="submit" disabled={loading} className="h-11 w-full rounded-xl text-sm font-semibold mt-2">
+            {loading ? "Processing transaction..." : authMode === "signin" ? "Go Online" : "Create & Go Online"}
+          </Button>
+        </form>
+
+        <div className="mt-6 text-center text-xs">
+          <span className="text-muted-foreground">
+            {authMode === "signin" ? "New to the platform? " : "Already have a profile? "}
+          </span>
+          <button
+            type="button"
+            onClick={() => setAuthMode(authMode === "signin" ? "signup" : "signin")}
+            className="font-semibold text-primary hover:underline ml-0.5"
+          >
+            {authMode === "signin" ? "Register here" : "Sign in here"}
+          </button>
+        </div>
+      </Card>
+    </div>
   );
 }

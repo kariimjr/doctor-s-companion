@@ -15,8 +15,6 @@ import { DoctorSignIn } from "@/components/DoctorSignIn";
 import { ChatDashboard } from "@/components/ChatDashboard";
 import { DiagnosesPanel } from "@/components/DiagnosesPanel";
 import { ActionPlanPanel } from "@/components/ActionPlanPanel";
-import { SpecialtyOnboarding } from "@/components/SpecialtyOnboarding";
-
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -40,25 +38,28 @@ export const Route = createFileRoute("/")({
 
 function PortalPage() {
   const [mounted, setMounted] = useState(false);
+  const [sessionTrigger, setSessionTrigger] = useState(0);
+
   useEffect(() => setMounted(true), []);
+
   const doctor = useDoctorSession();
   usePresence(doctor);
-  const { profile, loading: profileLoading } = useDoctorProfile(doctor?.id);
-  const needsOnboarding =
-    !!doctor && !profileLoading && (!profile || !profile.specialty);
-
+  const { profile } = useDoctorProfile(doctor?.id);
 
   if (!mounted) {
     return <div className="min-h-screen bg-secondary/40" />;
   }
+
+  // 🔐 If no active session, show the clean login interface
   if (!doctor) {
     return (
       <>
-        <DoctorSignIn />
+        <DoctorSignIn onAuthSuccess={() => setSessionTrigger((prev) => prev + 1)} />
         <Toaster richColors position="top-right" />
       </>
     );
   }
+
   return (
     <div className="min-h-screen bg-secondary/40">
       <header className="border-b bg-card">
@@ -78,7 +79,15 @@ function PortalPage() {
               </p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => clearDoctor()} className="gap-2">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => {
+              clearDoctor();
+              setSessionTrigger((prev) => prev + 1);
+            }} 
+            className="gap-2"
+          >
             <LogOut className="h-4 w-4" /> Sign out
           </Button>
         </div>
@@ -87,13 +96,9 @@ function PortalPage() {
       <main className="mx-auto max-w-7xl px-6 py-6">
         {!isFirebaseConfigured() && (
           <div className="mb-4 rounded-xl border border-primary/30 bg-secondary p-4 text-sm text-secondary-foreground">
-            <strong>Firebase isn't configured.</strong> Add{" "}
-            <code>VITE_FIREBASE_API_KEY</code>, <code>VITE_FIREBASE_PROJECT_ID</code>,{" "}
-            <code>VITE_FIREBASE_APP_ID</code> (and the rest of the Firebase config) as
-            environment variables. On Vercel, set them in Project Settings → Environment Variables.
+            <strong>Firebase isn't configured.</strong> Check your local environment configurations.
           </div>
         )}
-
 
         <Tabs defaultValue="chat" className="w-full">
           <TabsList className="mb-4 grid w-full max-w-2xl grid-cols-3">
@@ -107,6 +112,7 @@ function PortalPage() {
               <ClipboardList className="h-4 w-4" /> Issue Action Plan
             </TabsTrigger>
           </TabsList>
+          
           <TabsContent value="chat">
             <ChatDashboard doctor={doctor} />
           </TabsContent>
@@ -118,9 +124,7 @@ function PortalPage() {
           </TabsContent>
         </Tabs>
       </main>
-      <SpecialtyOnboarding open={needsOnboarding} doctor={doctor} />
       <Toaster richColors position="top-right" />
     </div>
   );
 }
-
