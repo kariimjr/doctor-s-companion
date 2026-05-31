@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
-import { Stethoscope, LogOut, MessageSquare, ClipboardCheck } from "lucide-react";
+import { Stethoscope, LogOut, MessageSquare, ClipboardCheck, ClipboardList } from "lucide-react";
 import {
   clearDoctor,
+  useDoctorProfile,
   useDoctorSession,
   usePresence,
 } from "@/lib/doctor-session";
@@ -13,6 +14,9 @@ import { isFirebaseConfigured } from "@/lib/firebase";
 import { DoctorSignIn } from "@/components/DoctorSignIn";
 import { ChatDashboard } from "@/components/ChatDashboard";
 import { DiagnosesPanel } from "@/components/DiagnosesPanel";
+import { ActionPlanPanel } from "@/components/ActionPlanPanel";
+import { SpecialtyOnboarding } from "@/components/SpecialtyOnboarding";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -39,6 +43,10 @@ function PortalPage() {
   useEffect(() => setMounted(true), []);
   const doctor = useDoctorSession();
   usePresence(doctor);
+  const { profile, loading: profileLoading } = useDoctorProfile(doctor?.id);
+  const needsOnboarding =
+    !!doctor && !profileLoading && (!profile || !profile.specialty);
+
 
   if (!mounted) {
     return <div className="min-h-screen bg-secondary/40" />;
@@ -62,7 +70,11 @@ function PortalPage() {
             <div>
               <h1 className="text-base font-semibold leading-tight">Doctor Medical Portal</h1>
               <p className="text-xs text-muted-foreground">
-                Welcome, Dr. {doctor.name} · <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> online</span>
+                Welcome, Dr. {doctor.name}
+                {profile?.specialty ? ` · ${profile.specialty}` : ""} ·{" "}
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> online
+                </span>
               </p>
             </div>
           </div>
@@ -82,13 +94,17 @@ function PortalPage() {
           </div>
         )}
 
+
         <Tabs defaultValue="chat" className="w-full">
-          <TabsList className="mb-4 grid w-full max-w-md grid-cols-2">
+          <TabsList className="mb-4 grid w-full max-w-2xl grid-cols-3">
             <TabsTrigger value="chat" className="gap-2">
               <MessageSquare className="h-4 w-4" /> Patient Chat
             </TabsTrigger>
             <TabsTrigger value="ai" className="gap-2">
               <ClipboardCheck className="h-4 w-4" /> Pending AI Approvals
+            </TabsTrigger>
+            <TabsTrigger value="plan" className="gap-2">
+              <ClipboardList className="h-4 w-4" /> Issue Action Plan
             </TabsTrigger>
           </TabsList>
           <TabsContent value="chat">
@@ -97,9 +113,14 @@ function PortalPage() {
           <TabsContent value="ai">
             <DiagnosesPanel doctor={doctor} />
           </TabsContent>
+          <TabsContent value="plan">
+            <ActionPlanPanel doctor={doctor} profile={profile} />
+          </TabsContent>
         </Tabs>
       </main>
+      <SpecialtyOnboarding open={needsOnboarding} doctor={doctor} />
       <Toaster richColors position="top-right" />
     </div>
   );
 }
+
