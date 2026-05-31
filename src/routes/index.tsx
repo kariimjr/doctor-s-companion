@@ -43,6 +43,10 @@ function PortalPage() {
   useEffect(() => setMounted(true), []);
   const doctor = useDoctorSession();
   usePresence(doctor);
+  const { profile, loading: profileLoading } = useDoctorProfile(doctor?.id);
+  const needsOnboarding =
+    !!doctor && !profileLoading && (!profile || !profile.specialty);
+
 
   if (!mounted) {
     return <div className="min-h-screen bg-secondary/40" />;
@@ -63,10 +67,22 @@ function PortalPage() {
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <Stethoscope className="h-5 w-5" />
             </div>
+  return (
+    <div className="min-h-screen bg-secondary/40">
+      <header className="border-b bg-card">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+              <Stethoscope className="h-5 w-5" />
+            </div>
             <div>
               <h1 className="text-base font-semibold leading-tight">Doctor Medical Portal</h1>
               <p className="text-xs text-muted-foreground">
-                Welcome, Dr. {doctor.name} · <span className="inline-flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> online</span>
+                Welcome, Dr. {doctor.name}
+                {profile?.specialty ? ` · ${profile.specialty}` : ""} ·{" "}
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" /> online
+                </span>
               </p>
             </div>
           </div>
@@ -85,6 +101,7 @@ function PortalPage() {
             environment variables. On Vercel, set them in Project Settings → Environment Variables.
           </div>
         )}
+
 
         <Tabs defaultValue="chat" className="w-full">
           <TabsList className="mb-4 grid w-full max-w-md grid-cols-2">
