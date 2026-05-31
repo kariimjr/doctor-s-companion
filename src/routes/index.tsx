@@ -96,12 +96,15 @@ function PortalPage() {
 
 
         <Tabs defaultValue="chat" className="w-full">
-          <TabsList className="mb-4 grid w-full max-w-md grid-cols-2">
+          <TabsList className="mb-4 grid w-full max-w-2xl grid-cols-3">
             <TabsTrigger value="chat" className="gap-2">
               <MessageSquare className="h-4 w-4" /> Patient Chat
             </TabsTrigger>
             <TabsTrigger value="ai" className="gap-2">
               <ClipboardCheck className="h-4 w-4" /> Pending AI Approvals
+            </TabsTrigger>
+            <TabsTrigger value="plan" className="gap-2">
+              <ClipboardList className="h-4 w-4" /> Issue Action Plan
             </TabsTrigger>
           </TabsList>
           <TabsContent value="chat">
@@ -110,9 +113,14 @@ function PortalPage() {
           <TabsContent value="ai">
             <DiagnosesPanel doctor={doctor} />
           </TabsContent>
+          <TabsContent value="plan">
+            <ActionPlanPanel doctor={doctor} profile={profile} />
+          </TabsContent>
         </Tabs>
       </main>
+      <SpecialtyOnboarding open={needsOnboarding} doctor={doctor} />
       <Toaster richColors position="top-right" />
     </div>
   );
 }
+
