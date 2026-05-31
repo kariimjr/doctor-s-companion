@@ -79,3 +79,32 @@ export function useDoctorStatus(doctorId: string | undefined) {
   }, [doctorId]);
   return status;
 }
+
+export interface DoctorProfile {
+  id: string;
+  name?: string;
+  specialty?: string;
+  status?: "online" | "offline";
+}
+
+/** Live profile from /doctors/{id}. `loading` reflects the first snapshot. */
+export function useDoctorProfile(doctorId: string | undefined) {
+  const [profile, setProfile] = useState<DoctorProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const db = getDb();
+    setProfile(null);
+    setLoading(true);
+    if (!db || !doctorId) {
+      setLoading(false);
+      return;
+    }
+    const unsub = onSnapshot(doc(db, "doctors", doctorId), (snap) => {
+      setProfile(snap.exists() ? ({ id: snap.id, ...(snap.data() as object) } as DoctorProfile) : null);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [doctorId]);
+  return { profile, loading };
+}
+
