@@ -7,6 +7,6 @@ export default defineConfig({
   },
   // 🎯 OVERRIDE: Tell Lovable to build for Vercel instead of Cloudflare
 nitro: {
-  preset: "vercel-edge",
+  preset: "vercel",
 },
 });
